@@ -16,7 +16,7 @@ It switches lighting profiles to match the app you're using, and never touches
 the firmware.
 
 ```
-foreground app  →  profile  →  effect @ 30–60 fps  →  6 × 65 B HID reports  →  69 keys
+foreground app  →  profile  →  effect @ up to 60 fps  →  6 × 65 B HID reports  →  69 keys
 ```
 
 ## Quick start
