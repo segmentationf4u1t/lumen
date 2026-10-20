@@ -7,6 +7,8 @@
 ![rust](https://img.shields.io/badge/rust-stable-black?style=flat-square&logo=rust)
 ![license](https://img.shields.io/badge/license-GPL--2.0--or--later-blue?style=flat-square)
 
+</div>
+
 ## What it is
 
 A tiny Windows tray app that drives the keyboard's LEDs directly over USB HID.
@@ -14,10 +16,13 @@ It switches lighting profiles to match the app you're using, and never touches
 the firmware.
 
 ```
-foreground app  →  profile  →  effect @ 60 fps  →  6 × 65 B HID reports  →  69 keys
+foreground app  →  profile  →  effect @ 30–60 fps  →  6 × 65 B HID reports  →  69 keys
 ```
 
 ## Quick start
+
+Needs Rust with the MSVC toolchain and the Windows SDK (its resource compiler
+embeds the icon).
 
 ```powershell
 cargo build --release
@@ -85,7 +90,8 @@ until you pick something in the tray. After that, your tray choice in
 | `keys` | per-key colors; names come from `vulcanctl dump-layout`, case-insensitive |
 | `app_rules` | process name → profile, matched case-insensitively |
 
-If the config is broken, lumen keeps using defaults and doesn't overwrite your file.
+If the config is broken, lumen keeps the last working one (defaults at startup) and
+doesn't overwrite your file.
 
 ## CLI
 
@@ -103,10 +109,10 @@ All flags: `vulcanctl --help`.
 
 ## Safety
 
-- **Lighting only.** lumen sends lighting reports and nothing else. It has no
-  firmware update or DFU code, so it can't brick the keyboard.
+- **Lighting only.** lumen sends lighting reports to the keyboard and nothing
+  else. It has no firmware update or DFU code, so it can't brick the keyboard.
+- To get exclusive access it closes **OpenRGB** and **SWARM** if they are
+  running, and CLI commands that write to the keyboard stop `vulcand` first.
 - No keyboard hooks, no macros, no key remapping. Profile switching only
   reads which app is in the foreground.
 - Tested on `1E7D:2F09`, firmware `1.26`, Windows 11 x64.
-
----
