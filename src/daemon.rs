@@ -167,6 +167,7 @@ fn render_loop(shared: &Arc<Shared>) {
     let started = Instant::now();
     let mut colors = [[0u8; 3]; LED_COUNT];
     let mut next_frame = Instant::now();
+    let mut next_direct_check = Instant::now();
 
     while !shared.is_shutdown() && !CTRL_SHUTDOWN.load(Ordering::SeqCst) {
         let now = Instant::now();
@@ -226,6 +227,20 @@ fn render_loop(shared: &Arc<Shared>) {
                     backoff = (backoff * 2).min(Duration::from_secs(5));
                     thread::sleep(Duration::from_millis(100));
                     continue;
+                }
+            }
+        }
+
+        if now >= next_direct_check {
+            next_direct_check = now + Duration::from_secs(1);
+            if let Some(dev) = device.as_ref() {
+                if let Ok(false) = dev.direct_enabled() {
+                    shared.log("keyboard left direct mode; re-arming");
+                    if let Err(e) = dev.begin_direct() {
+                        shared.log(&format!("re-arm failed: {e}"));
+                        device = None;
+                        continue;
+                    }
                 }
             }
         }

@@ -110,6 +110,16 @@ impl VulcanDevice {
         self.control.set_feature(&report)
     }
 
+    /// Read back the direct-mode flag (report 0x0E byte 2). The keyboard can
+    /// leave direct mode on its own (e.g. Fn lighting keys) while LED writes
+    /// keep succeeding, so this is the only way to notice.
+    pub fn direct_enabled(&self) -> Result<bool> {
+        let mut report = [0u8; 5];
+        report[0] = 0x0E;
+        self.control.get_feature(&mut report)?;
+        Ok(report[2] == 1)
+    }
+
     /// Enter streaming mode. Some firmware revisions need both the mode report
     /// (`0x11` with mode 0x0B) and the direct switch (`0x0E 05 01`); sending
     /// only one can leave the firmware effect in control while HID writes still
