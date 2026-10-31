@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -54,6 +54,9 @@ pub struct Shared {
     shutdown: AtomicBool,
     pub tray_hwnd: AtomicIsize,
     status: Mutex<String>,
+    /// Bumped after every change that affects `active()`, `tip()` or the
+    /// frame rate, so pollers can skip re-resolving unchanged state.
+    generation: AtomicU64,
 }
 
 impl Shared {
@@ -82,6 +85,7 @@ impl Shared {
             shutdown: AtomicBool::new(false),
             tray_hwnd: AtomicIsize::new(0),
             status: Mutex::new("starting".to_owned()),
+            generation: AtomicU64::new(0),
         })
     }
 
@@ -107,6 +111,17 @@ impl Shared {
             }
         }
         *self.config.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(config);
+        self.bump();
+    }
+
+    /// Change counter. Read it before reading state: a bump that races the
+    /// read is then seen on the next poll.
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
+    }
+
+    fn bump(&self) {
+        self.generation.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Resolve what should be rendered right now.
@@ -163,6 +178,7 @@ impl Shared {
 
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::SeqCst);
+        self.bump();
         self.update(|sel| sel.paused = !enabled);
     }
 
@@ -174,6 +190,8 @@ impl Shared {
             return false;
         }
         runtime.app = matched;
+        drop(runtime);
+        self.bump();
         true
     }
 
@@ -187,6 +205,7 @@ impl Shared {
             }
             runtime.selection.clone()
         };
+        self.bump();
         self.save_state(&snapshot);
         true
     }
@@ -204,7 +223,13 @@ impl Shared {
     }
 
     pub fn set_status(&self, status: impl Into<String>) {
-        *self.status.lock().unwrap_or_else(|e| e.into_inner()) = status.into();
+        let status = status.into();
+        let mut current = self.status.lock().unwrap_or_else(|e| e.into_inner());
+        if *current != status {
+            *current = status;
+            drop(current);
+            self.bump();
+        }
     }
 
     pub fn status(&self) -> String {
@@ -409,6 +434,41 @@ mod tests {
         let active = shared.active();
         assert_eq!(active.profile_name, "showcase");
         assert_eq!(active.effect, Effect::Showcase);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The render loop and tray only re-resolve `active()` when the
+    /// generation moves; a missed bump would leave stale lighting.
+    #[test]
+    fn every_lighting_change_moves_the_generation() {
+        let dir = temp_dir("generation");
+        let shared = Shared::new(config_with_showcase_default(), dir.join("config.json"));
+        type Change<'a> = (&'a str, &'a dyn Fn(&Shared));
+        let changes: [Change; 7] = [
+            ("profile", &|s| assert!(s.select_profile("default"))),
+            ("effect", &|s| assert!(s.select_effect(Some(Effect::Fire)))),
+            ("brightness", &|s| assert!(s.select_brightness(Some(0.5)))),
+            ("pause", &|s| s.set_enabled(false)),
+            ("app rule", &|s| {
+                assert!(s.set_app_match(Some(("cs2.exe".into(), "fps".into()))))
+            }),
+            ("status", &|s| s.set_status("connected")),
+            ("config", &|s| {
+                s.replace_config(config_with_showcase_default())
+            }),
+        ];
+        for (what, change) in changes {
+            let before = shared.generation();
+            change(&shared);
+            assert_ne!(shared.generation(), before, "{what} did not bump");
+        }
+
+        // No-op updates must not force a re-resolve or tray refresh.
+        let before = shared.generation();
+        assert!(!shared.select_effect(Some(Effect::Fire)));
+        assert!(!shared.set_app_match(Some(("cs2.exe".into(), "fps".into()))));
+        shared.set_status("connected");
+        assert_eq!(shared.generation(), before);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -206,6 +206,11 @@ fn render_loop(shared: &Arc<Shared>) {
     let mut colors = [[0u8; 3]; LED_COUNT];
     let mut next_frame = Instant::now();
     let mut next_direct_check = Instant::now();
+    // Resolved lighting, refreshed only when `Shared` reports a change so the
+    // frame path does not clone the profile 60 times a second.
+    let mut seen_generation = shared.generation();
+    let mut active = shared.active();
+    let mut frame_time = frame_duration(&shared.config());
 
     while !shared.is_shutdown() && !CTRL_SHUTDOWN.load(Ordering::SeqCst) {
         let now = Instant::now();
@@ -283,8 +288,12 @@ fn render_loop(shared: &Arc<Shared>) {
             }
         }
 
-        let cfg = shared.config();
-        let active = shared.active();
+        let generation = shared.generation();
+        if generation != seen_generation {
+            seen_generation = generation;
+            active = shared.active();
+            frame_time = frame_duration(&shared.config());
+        }
         effects::render_with(
             &active.profile,
             active.effect,
@@ -303,8 +312,6 @@ fn render_loop(shared: &Arc<Shared>) {
             }
         }
 
-        let fps = cfg.settings.fps.clamp(10, 60);
-        let frame_time = Duration::from_secs_f64(1.0 / fps as f64);
         next_frame += frame_time;
         let now = Instant::now();
         if next_frame > now {
@@ -318,6 +325,10 @@ fn render_loop(shared: &Arc<Shared>) {
     if let Some(dev) = device.take() {
         restore_current(shared, &dev);
     }
+}
+
+fn frame_duration(cfg: &Config) -> Duration {
+    Duration::from_secs_f64(1.0 / cfg.settings.fps.clamp(10, 60) as f64)
 }
 
 /// Leave the keyboard showing a static snapshot of the current selection.

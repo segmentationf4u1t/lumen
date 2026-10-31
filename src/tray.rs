@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 use crate::runtime::Shared;
 use std::mem::size_of;
 use std::ptr::{null, null_mut};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, OnceLock};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::{
@@ -33,7 +33,8 @@ static TASKBAR_CREATED: OnceLock<u32> = OnceLock::new();
 static ICONS: LazyLock<(isize, isize)> =
     LazyLock::new(|| (load_icon(ICON_ACTIVE), load_icon(ICON_PAUSED_ID)));
 static ICON_ADDED: AtomicBool = AtomicBool::new(false);
-static ICON_PAUSED: AtomicBool = AtomicBool::new(false);
+/// `Shared::generation` the icon and tooltip were last built from.
+static SHOWN_GENERATION: AtomicU64 = AtomicU64::new(u64::MAX);
 
 const CLASS_NAME: &str = "VulcanControlTray";
 const TRAY_ID: u32 = 1;
@@ -189,8 +190,9 @@ fn current_icon(paused: bool) -> HICON {
 }
 
 fn notify_data(hwnd: HWND, shared: &Shared) -> NOTIFYICONDATAW {
+    // Record before reading state: a change racing this read re-triggers.
+    SHOWN_GENERATION.store(shared.generation(), Ordering::SeqCst);
     let paused = !shared.is_enabled();
-    ICON_PAUSED.store(paused, Ordering::SeqCst);
     let mut nid = NOTIFYICONDATAW {
         cbSize: size_of::<NOTIFYICONDATAW>() as u32,
         hWnd: hwnd,
@@ -532,8 +534,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     match msg {
         WM_TIMER => {
             // Re-adds the icon if Explorer was not ready at login, keeps the
-            // tooltip current, and swaps the paused/active icon.
-            refresh_icon(hwnd, shared);
+            // tooltip current, and swaps the paused/active icon. Unchanged
+            // state skips the cross-process Shell_NotifyIconW call.
+            if !ICON_ADDED.load(Ordering::SeqCst)
+                || SHOWN_GENERATION.load(Ordering::SeqCst) != shared.generation()
+            {
+                refresh_icon(hwnd, shared);
+            }
             if shared.is_shutdown() {
                 PostMessageW(hwnd, WM_CLOSE, 0, 0);
             }
