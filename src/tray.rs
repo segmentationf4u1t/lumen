@@ -270,9 +270,18 @@ impl Menu {
 
     fn submenu(&self, text: &str, child: Menu) -> &Self {
         let text = wide(text);
-        let handle = child.0;
-        std::mem::forget(child);
-        unsafe { AppendMenuW(self.0, MF_POPUP | MF_STRING, handle as usize, text.as_ptr()) };
+        let attached = unsafe {
+            AppendMenuW(
+                self.0,
+                MF_POPUP | MF_STRING,
+                child.0 as usize,
+                text.as_ptr(),
+            )
+        } != 0;
+        if attached {
+            // Owned by `self` now; destroyed with it.
+            std::mem::forget(child);
+        }
         self
     }
 
