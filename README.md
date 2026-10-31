@@ -11,15 +11,17 @@
 
 ## What it is
 
-A tiny Windows tray app that drives the keyboard's LEDs directly over USB HID.
-It switches lighting profiles to match the app you're using, and never touches
-the firmware.
+A tiny tray app for Windows and Linux that drives the keyboard's LEDs directly
+over USB HID. It switches lighting profiles to match the app you're using, and
+never touches the firmware.
 
 ```
 foreground app  →  profile  →  effect @ up to 60 fps  →  6 × 65 B HID reports  →  69 keys
 ```
 
 ## Quick start
+
+### Windows
 
 Needs Rust with the MSVC toolchain and the Windows SDK (its resource compiler
 embeds the icon).
@@ -31,16 +33,43 @@ cargo build --release
 ```
 
 Click the tray icon (on Windows 11 it may be hidden under **^**). The menu
-follows the system light/dark theme:
+follows the system light/dark theme.
+
+### Linux
+
+Needs Rust and nothing else: no C libraries, no root at runtime. Allow your
+user to open the keyboard's hidraw nodes once:
+
+```sh
+sudo install -m644 assets/70-vulcan.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=hidraw
+```
+
+```sh
+cargo build --release
+./target/release/vulcanctl probe            # find the keyboard, read firmware
+./target/release/vulcand                    # start the tray app
+```
+
+The tray icon is a StatusNotifierItem: it shows up in any SNI host (Waybar's
+`tray` module, Quickshell, KDE, GNOME with the AppIndicator extension). If no
+host runs yet, it appears once one does. `vulcand --no-tray` runs headless.
+
+### The tray menu
 
 - **Profile**, **Animation**, **Brightness**: your choice sticks. It is saved
   to `state.json` and survives restarts and alt-tabbing.
 - **App rules** from the config temporarily replace your choice while that app
   is focused, then hand it back.
-- **Pause lighting** and **Start with Windows** are toggles. **Edit config**
-  opens the JSON in your default editor.
+- **Pause lighting** and **Start with Windows** / **Start on login** are
+  toggles. **Edit config** opens the JSON in your default editor.
 
 `vulcanctl quit` stops the tray app and leaves a static frame on the keyboard.
+
+On Linux, **Start on login** installs a systemd user service
+(`~/.config/systemd/user/vulcand.service`, wanted by `default.target`), so it
+works with any desktop or compositor. It points at the `vulcand` it was enabled
+from; re-enable it after moving the binary.
 
 ## Effects
 
@@ -59,10 +88,11 @@ follows the system light/dark theme:
 
 ## Configuration
 
-The config lives at `%APPDATA%\vulcan\config.json`. It's created on first run and
-reloaded automatically about 1 s after you save it. `default_profile` is used
-until you pick something in the tray. After that, your tray choice in
-`state.json` wins.
+The config lives at `%APPDATA%\vulcan\config.json` on Windows and
+`~/.config/vulcan/config.json` (`$XDG_CONFIG_HOME`) on Linux, next to
+`state.json` and `vulcand.log`. It's created on first run and reloaded
+automatically about 1 s after you save it. `default_profile` is used until you
+pick something in the tray. After that, your tray choice in `state.json` wins.
 
 ```json
 {
@@ -90,6 +120,11 @@ until you pick something in the tray. After that, your tray choice in
 | `keys` | per-key colors; names come from `vulcanctl dump-layout`, case-insensitive |
 | `app_rules` | process name → profile, matched case-insensitively |
 
+On Linux, app rules need Hyprland: Wayland gives other apps no portable way to
+see the focused window, so elsewhere they stay inactive. The process name is
+the executable's file name (`firefox`, `cs2`); Wine and Proton games match by
+their Windows `.exe` name, so Windows rules like `cs2.exe` keep working.
+
 If the config is broken, lumen keeps the last working one (defaults at startup) and
 doesn't overwrite your file.
 
@@ -102,7 +137,7 @@ doesn't overwrite your file.
 | `vulcanctl effect --name <fx>` | run one effect, then restore |
 | `vulcanctl static --color <hex>` | set a persistent static color |
 | `vulcanctl sweep` | light keys one at a time to check the key map |
-| `vulcanctl autostart on\|off` | start with Windows (current user) |
+| `vulcanctl autostart on\|off` | start `vulcand` at login (current user) |
 | `vulcanctl quit` | stop the tray app and restore |
 
 All flags: `vulcanctl --help`.
@@ -112,7 +147,9 @@ All flags: `vulcanctl --help`.
 - **Lighting only.** lumen sends lighting reports to the keyboard and nothing
   else. It has no firmware update or DFU code, so it can't brick the keyboard.
 - To get exclusive access it closes **OpenRGB** and **SWARM** if they are
-  running, and CLI commands that write to the keyboard stop `vulcand` first.
+  running (on Linux: OpenRGB, with SIGTERM), and CLI commands that write to the
+  keyboard stop `vulcand` first.
 - No keyboard hooks, no macros, no key remapping. Profile switching only
   reads which app is in the foreground.
-- Tested on `1E7D:2F09`, firmware `1.26`, Windows 11 x64.
+- Tested on `1E7D:2F09`, firmware `1.26`: Windows 11 x64, and Arch Linux with
+  Hyprland 0.56 and Quickshell.

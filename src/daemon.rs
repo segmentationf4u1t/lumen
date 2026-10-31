@@ -4,6 +4,7 @@ use crate::effects;
 use crate::error::{Error, Result};
 use crate::protocol::{VulcanDevice, BRIGHTNESS_MAX, LED_COUNT, SPEED_MAX};
 use crate::runtime::Shared;
+use crate::takeover::DaemonLock;
 use crate::tray;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
@@ -11,42 +12,31 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
-use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE};
-use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
-use windows_sys::Win32::System::Threading::CreateMutexW;
-use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
 
 static CTRL_SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
-unsafe extern "system" fn ctrl_handler(_event: u32) -> windows_sys::core::BOOL {
-    CTRL_SHUTDOWN.store(true, Ordering::SeqCst);
-    1
-}
-
-fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-struct SingleInstance(HANDLE);
-
-impl SingleInstance {
-    fn acquire() -> Result<Option<Self>> {
-        let name = wide(r"Local\VulcanControlDaemon");
-        let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
-        if handle.is_null() {
-            return Err(Error::last_os("CreateMutexW"));
-        }
-        if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
-            unsafe { CloseHandle(handle) };
-            return Ok(None);
-        }
-        Ok(Some(Self(handle)))
+/// Ctrl+C or console close (Windows); SIGINT, SIGTERM or SIGHUP (Linux,
+/// e.g. `systemctl --user stop`). Leaves the render loop so the keyboard is
+/// restored before exit.
+#[cfg(windows)]
+fn install_shutdown_handler() {
+    unsafe extern "system" fn handler(_event: u32) -> windows_sys::core::BOOL {
+        CTRL_SHUTDOWN.store(true, Ordering::SeqCst);
+        1
     }
+    let _ = unsafe { windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(handler), 1) };
 }
 
-impl Drop for SingleInstance {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.0) };
+#[cfg(target_os = "linux")]
+fn install_shutdown_handler() {
+    extern "C" fn handler(_signal: libc::c_int) {
+        // An atomic store is async-signal-safe; everything else waits for
+        // the render loop.
+        CTRL_SHUTDOWN.store(true, Ordering::SeqCst);
+    }
+    let handler = handler as extern "C" fn(libc::c_int) as libc::sighandler_t;
+    for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+        unsafe { libc::signal(signal, handler) };
     }
 }
 
@@ -75,13 +65,14 @@ pub fn run() -> Result<()> {
     }
 
     // Crisp tray icon and menus on scaled displays. Must precede any window.
+    #[cfg(windows)]
     unsafe {
         windows_sys::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
             windows_sys::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
         );
     }
 
-    let Some(_instance) = SingleInstance::acquire()? else {
+    let Some(_instance) = DaemonLock::acquire()? else {
         eprintln!("vulcand is already running");
         return Ok(());
     };
@@ -103,7 +94,7 @@ pub fn run() -> Result<()> {
         shared.set_status(format!("config error: {e}"));
     }
 
-    let _ = unsafe { SetConsoleCtrlHandler(Some(ctrl_handler), 1) };
+    install_shutdown_handler();
 
     let tray_handle = if with_tray {
         let s = Arc::clone(&shared);
@@ -148,10 +139,9 @@ pub fn run() -> Result<()> {
     }
 
     shared.shutdown();
-    let hwnd = shared.tray_hwnd.load(Ordering::SeqCst);
-    if hwnd != 0 {
-        unsafe { PostMessageW(hwnd as _, WM_CLOSE, 0, 0) };
-    }
+    // The Linux tray polls `is_shutdown`; the Win32 one blocks in GetMessageW.
+    #[cfg(windows)]
+    tray::close();
     let _ = tray_handle.map(|h| h.join());
     let _ = watcher.join();
     shared.log("vulcand stopped");

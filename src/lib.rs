@@ -1,3 +1,6 @@
+#[cfg(not(any(windows, target_os = "linux")))]
+compile_error!("lumen supports Windows and Linux only");
+
 pub mod apps;
 pub mod autostart;
 pub mod color;

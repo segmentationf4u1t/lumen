@@ -10,10 +10,13 @@ impl Error {
         Self(msg.into())
     }
 
+    /// Wrap the calling thread's last OS error (`GetLastError` / `errno`).
+    /// Call it right after the failing system call.
     pub fn last_os(what: &str) -> Self {
-        let code = unsafe { windows_sys::Win32::Foundation::GetLastError() };
-        let io = std::io::Error::from_raw_os_error(code as i32);
-        Self(format!("{what}: {io} (win32 {code})"))
+        let io = std::io::Error::last_os_error();
+        let code = io.raw_os_error().unwrap_or(0);
+        let kind = if cfg!(windows) { "win32" } else { "errno" };
+        Self(format!("{what}: {io} ({kind} {code})"))
     }
 }
 

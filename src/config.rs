@@ -226,9 +226,15 @@ impl Config {
     }
 }
 
+/// `%APPDATA%\vulcan` on Windows, `$XDG_CONFIG_HOME/vulcan` (default
+/// `~/.config/vulcan`) on Linux. Config, `state.json` and the log live here.
 pub fn config_dir() -> PathBuf {
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        PathBuf::from(appdata).join("vulcan")
+    #[cfg(windows)]
+    let base = std::env::var_os("APPDATA").map(PathBuf::from);
+    #[cfg(not(windows))]
+    let base = xdg_config_home();
+    if let Some(base) = base {
+        base.join("vulcan")
     } else if let Ok(exe) = std::env::current_exe() {
         exe.parent()
             .map(Path::to_path_buf)
@@ -236,6 +242,16 @@ pub fn config_dir() -> PathBuf {
     } else {
         PathBuf::from(".")
     }
+}
+
+/// `$XDG_CONFIG_HOME`, or `~/.config`. Relative values are invalid per the
+/// XDG spec and ignored.
+#[cfg(not(windows))]
+pub fn xdg_config_home() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
 }
 
 pub fn default_config_path() -> PathBuf {

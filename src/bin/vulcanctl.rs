@@ -99,7 +99,8 @@ COMMANDS:
   restore                     restore config default profile as static
   validate-config [--config PATH]
                               parse and validate config
-  autostart on|off            per-user registry autostart for vulcand.exe
+  autostart on|off            start vulcand at login for the current user
+                              (Windows: Run key; Linux: systemd user service)
   quit                        ask a running tray daemon to exit gracefully
 
 SAFETY:
@@ -462,7 +463,7 @@ fn autostart_cmd(args: &[String]) -> Result<()> {
     match args.first().map(String::as_str) {
         Some("on") => {
             autostart::set_enabled(true)?;
-            println!("autostart enabled for the current user (vulcand.exe)");
+            println!("autostart enabled for the current user");
         }
         Some("off") => {
             autostart::set_enabled(false)?;

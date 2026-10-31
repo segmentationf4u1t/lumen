@@ -1,0 +1,7 @@
+# ROCCAT Vulcan II Mini (1e7d:2f09): give the user at the seat read/write
+# access to its hidraw nodes, so lumen (vulcand, vulcanctl) runs without root.
+# Install:
+#   sudo install -m644 assets/70-vulcan.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=hidraw
+# Must sort before 73-seat-late.rules, which turns the uaccess tag into ACLs.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e7d", ATTRS{idProduct}=="2f09", TAG+="uaccess"

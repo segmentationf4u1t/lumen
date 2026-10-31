@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -52,7 +52,6 @@ pub struct Shared {
     runtime: Mutex<Runtime>,
     enabled: AtomicBool,
     shutdown: AtomicBool,
-    pub tray_hwnd: AtomicIsize,
     status: Mutex<String>,
     /// Bumped after every change that affects `active()`, `tip()` or the
     /// frame rate, so pollers can skip re-resolving unchanged state.
@@ -83,7 +82,6 @@ impl Shared {
             }),
             enabled: AtomicBool::new(enabled),
             shutdown: AtomicBool::new(false),
-            tray_hwnd: AtomicIsize::new(0),
             status: Mutex::new("starting".to_owned()),
             generation: AtomicU64::new(0),
         })
