@@ -163,9 +163,42 @@ pub fn run() -> Result<()> {
 /// showcase cycles keeps the showcase sequence continuous across the wrap.
 const TIME_WRAP_SECS: f64 = 3600.0;
 
+/// Reconnect delay. Doubles per failure and resets only after a connection
+/// stayed healthy, so a keyboard that connects but fails every write cannot
+/// drive a full HID enumeration + log write every 250 ms.
+struct Backoff {
+    delay: Duration,
+}
+
+impl Backoff {
+    const MIN: Duration = Duration::from_millis(250);
+    const MAX: Duration = Duration::from_secs(5);
+    const HEALTHY: Duration = Duration::from_secs(10);
+
+    fn new() -> Self {
+        Self { delay: Self::MIN }
+    }
+
+    /// Delay before the next attempt after a failed connect.
+    fn next(&mut self) -> Duration {
+        let delay = self.delay;
+        self.delay = (delay * 2).min(Self::MAX);
+        delay
+    }
+
+    /// Delay before reconnecting after a connection that lasted `uptime`.
+    fn connection_lost(&mut self, uptime: Duration) -> Duration {
+        if uptime >= Self::HEALTHY {
+            self.delay = Self::MIN;
+        }
+        self.next()
+    }
+}
+
 fn render_loop(shared: &Arc<Shared>) {
     let mut device: Option<VulcanDevice> = None;
-    let mut backoff = Duration::from_millis(250);
+    let mut backoff = Backoff::new();
+    let mut connected_at = Instant::now();
     let mut next_connect = Instant::now();
     let mut next_reload = Instant::now() + Duration::from_secs(1);
     let mut last_mtime = mtime(shared.config_path());
@@ -209,14 +242,13 @@ fn render_loop(shared: &Arc<Shared>) {
                         ));
                         shared.set_status("connected");
                         device = Some(dev);
-                        backoff = Duration::from_millis(250);
+                        connected_at = Instant::now();
                         next_frame = Instant::now();
                     }
                     Err(e) => {
                         shared.log(&format!("direct mode failed: {e}"));
                         shared.set_status(format!("direct mode failed: {e}"));
-                        next_connect = now + backoff;
-                        backoff = (backoff * 2).min(Duration::from_secs(5));
+                        next_connect = now + backoff.next();
                     }
                 },
                 Err(e) => {
@@ -228,8 +260,7 @@ fn render_loop(shared: &Arc<Shared>) {
                         shared.log(&msg);
                         shared.set_status(msg);
                     }
-                    next_connect = now + backoff;
-                    backoff = (backoff * 2).min(Duration::from_secs(5));
+                    next_connect = now + backoff.next();
                     thread::sleep(Duration::from_millis(100));
                     continue;
                 }
@@ -244,6 +275,8 @@ fn render_loop(shared: &Arc<Shared>) {
                     if let Err(e) = dev.begin_direct() {
                         shared.log(&format!("re-arm failed: {e}"));
                         device = None;
+                        next_connect =
+                            Instant::now() + backoff.connection_lost(connected_at.elapsed());
                         continue;
                     }
                 }
@@ -265,8 +298,7 @@ fn render_loop(shared: &Arc<Shared>) {
                 shared.log(&format!("frame write failed: {e}"));
                 shared.set_status(format!("write failed: {e}"));
                 device = None;
-                next_connect = Instant::now() + backoff;
-                backoff = (backoff * 2).min(Duration::from_secs(5));
+                next_connect = Instant::now() + backoff.connection_lost(connected_at.elapsed());
                 continue;
             }
         }
@@ -404,6 +436,22 @@ mod tests {
             })
             .collect();
         cfg
+    }
+
+    /// A keyboard that connects but fails right away must not be retried
+    /// every 250 ms forever (two full HID enumerations per attempt).
+    #[test]
+    fn short_lived_connections_keep_backing_off() {
+        let mut backoff = Backoff::new();
+        let delays: Vec<_> = (0..6)
+            .map(|_| backoff.connection_lost(Duration::from_millis(50)))
+            .collect();
+        assert_eq!(delays[0], Backoff::MIN);
+        assert!(delays.windows(2).all(|w| w[1] >= w[0]));
+        assert_eq!(*delays.last().unwrap(), Backoff::MAX);
+
+        // A connection that stayed healthy starts over from the minimum.
+        assert_eq!(backoff.connection_lost(Backoff::HEALTHY), Backoff::MIN);
     }
 
     #[test]
