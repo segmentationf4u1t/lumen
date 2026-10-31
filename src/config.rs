@@ -1,4 +1,5 @@
-use crate::effects::Profile;
+use crate::color::Rgb;
+use crate::effects::{Effect, Profile};
 use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -36,7 +37,7 @@ impl Default for Settings {
 }
 
 fn default_fps() -> u32 {
-    30
+    60
 }
 
 fn default_debounce_ms() -> u64 {
@@ -80,17 +81,55 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        let mut profiles = BTreeMap::new();
-        profiles.insert("default".to_owned(), Profile::default());
         Self {
             version: CONFIG_VERSION,
             default_profile: "default".to_owned(),
-            profiles,
+            profiles: presets(),
             app_rules: Vec::new(),
             settings: Settings::default(),
             device: DeviceSelector::default(),
         }
     }
+}
+
+/// dark-volcanic palette (the Hyprland / Quickshell theme).
+const MAGMA: Rgb = Rgb(0xFF, 0x7A, 0x3D);
+const SULFUR: Rgb = Rgb(0xF3, 0xC2, 0x4F);
+const EMBER: Rgb = Rgb(0xFF, 0xA3, 0x6B);
+const FIRE: Rgb = Rgb(0xFF, 0x5C, 0x5C);
+const CREAM: Rgb = Rgb(0xEB, 0xDF, 0xD8);
+/// Cooled lava: the dark side of the waves. Basalt (#100908) itself is too
+/// dim to register on the LEDs.
+const CRUST: Rgb = Rgb(0x3A, 0x0E, 0x06);
+
+/// Profiles a fresh config starts with: dark-volcanic colors, slow and smooth.
+/// Only `static`, `breathe` and `wave` take their colors from the profile.
+fn presets() -> BTreeMap<String, Profile> {
+    let preset = |effect, color, secondary, speed, brightness| Profile {
+        effect,
+        color,
+        secondary,
+        speed,
+        brightness,
+        keys: BTreeMap::new(),
+    };
+    let fps = Profile {
+        keys: ["W", "A", "S", "D"]
+            .into_iter()
+            .map(|key| (key.to_owned(), CREAM))
+            .collect(),
+        ..preset(Effect::Static, MAGMA, CRUST, 1.0, 0.85)
+    };
+    BTreeMap::from([
+        // Glowing lava flowing over a dark crust.
+        ("default".to_owned(), preset(Effect::Wave, MAGMA, CRUST, 0.5, 0.8)),
+        ("magma".to_owned(), preset(Effect::Wave, MAGMA, SULFUR, 0.6, 0.9)),
+        ("lava".to_owned(), preset(Effect::Wave, FIRE, CRUST, 0.4, 0.8)),
+        ("ember".to_owned(), preset(Effect::Breathe, EMBER, CRUST, 0.4, 0.6)),
+        ("eruption".to_owned(), preset(Effect::Fire, FIRE, SULFUR, 0.8, 1.0)),
+        ("basalt".to_owned(), preset(Effect::Static, MAGMA, CRUST, 1.0, 0.25)),
+        ("fps".to_owned(), fps),
+    ])
 }
 
 impl Config {

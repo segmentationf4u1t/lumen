@@ -94,6 +94,18 @@ The config lives at `%APPDATA%\vulcan\config.json` on Windows and
 automatically about 1 s after you save it. `default_profile` is used until you
 pick something in the tray. After that, your tray choice in `state.json` wins.
 
+A new config starts with dark-volcanic presets, slow and smooth, at 60 fps:
+
+| Preset | Look |
+|---|---|
+| `default` | magma glow flowing over dark crust (`wave`) |
+| `magma` | magma and sulfur waves |
+| `lava` | red lava over dark crust, slower |
+| `ember` | slow ember breathing |
+| `eruption` | `fire` flicker at full brightness |
+| `basalt` | dim static magma |
+| `fps` | static magma, cream WASD |
+
 ```json
 {
   "version": 1,
