@@ -45,10 +45,10 @@ pub fn basename(path: &str) -> &str {
 
 /// First rule whose process basename matches. Matching is case-insensitive.
 pub fn match_rule<'a>(rules: &'a [AppRule], process: &str) -> Option<&'a AppRule> {
-    let process = basename(process).to_ascii_lowercase();
+    let process = basename(process);
     rules
         .iter()
-        .find(|r| basename(&r.process).to_ascii_lowercase() == process)
+        .find(|r| basename(&r.process).eq_ignore_ascii_case(process))
 }
 
 #[cfg(test)]
