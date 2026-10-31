@@ -158,6 +158,11 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
+/// Effect time wraps at this period. `f32` seconds lose sub-frame precision
+/// after about a day of uptime (animations stutter); a whole number of
+/// showcase cycles keeps the showcase sequence continuous across the wrap.
+const TIME_WRAP_SECS: f64 = 3600.0;
+
 fn render_loop(shared: &Arc<Shared>) {
     let mut device: Option<VulcanDevice> = None;
     let mut backoff = Duration::from_millis(250);
@@ -251,7 +256,7 @@ fn render_loop(shared: &Arc<Shared>) {
             &active.profile,
             active.effect,
             active.brightness,
-            started.elapsed().as_secs_f32(),
+            (started.elapsed().as_secs_f64() % TIME_WRAP_SECS) as f32,
             &mut colors,
         );
 
