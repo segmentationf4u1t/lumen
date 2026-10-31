@@ -146,6 +146,9 @@ All flags: `vulcanctl --help`.
 
 - **Lighting only.** lumen sends lighting reports to the keyboard and nothing
   else. It has no firmware update or DFU code, so it can't brick the keyboard.
+- The static frame left on exit (and `vulcanctl static`) is stored in the
+  keyboard's active onboard profile, replacing that profile's saved effect.
+  The other onboard profiles are not touched.
 - To get exclusive access it closes **OpenRGB** and **SWARM** if they are
   running (on Linux: OpenRGB, with SIGTERM), and CLI commands that write to the
   keyboard stop `vulcand` first.

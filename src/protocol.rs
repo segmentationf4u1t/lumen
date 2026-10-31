@@ -120,13 +120,35 @@ impl VulcanDevice {
         Ok(report[2] == 1)
     }
 
+    /// Onboard profile the keyboard shows (report 0x05: id, size, active
+    /// index, profile count). Mode reports must target it: a report for
+    /// another profile is stored there and never shown.
+    pub fn active_profile(&self) -> Result<u8> {
+        let mut report = [0u8; 4];
+        report[0] = 0x05;
+        self.control.get_feature(&mut report)?;
+        let (index, count) = (report[2], report[3]);
+        if report[0] != 0x05 || index >= count {
+            return Err(Error::new(format!(
+                "unexpected profile report {report:02x?}"
+            )));
+        }
+        Ok(index)
+    }
+
     /// Enter streaming mode. Some firmware revisions need both the mode report
     /// (`0x11` with mode 0x0B) and the direct switch (`0x0E 05 01`); sending
     /// only one can leave the firmware effect in control while HID writes still
     /// return success.
     pub fn begin_direct(&self) -> Result<()> {
         let black = [[0u8; 3]; LED_COUNT];
-        let report = build_mode_report(&black, MODE_DIRECT, 6, BRIGHTNESS_MAX);
+        let report = build_mode_report(
+            &black,
+            self.active_profile()?,
+            MODE_DIRECT,
+            6,
+            BRIGHTNESS_MAX,
+        );
         self.control.set_feature(&report)?;
         // Give the mode switch time to settle before the first stream packet.
         let _ = self.wait_ready();
@@ -184,15 +206,16 @@ impl VulcanDevice {
         Ok(())
     }
 
-    /// Static mode is stored by the keyboard and survives this process.
-    /// The Mini needs the keepalive handshake for the report to commit.
+    /// Static mode is stored in the active onboard profile and survives this
+    /// process. The Mini needs the keepalive handshake for the report to commit.
     pub fn send_static(
         &self,
         colors: &[[u8; 3]; LED_COUNT],
         speed: u8,
         brightness: u8,
     ) -> Result<()> {
-        let report = build_mode_report(colors, MODE_STATIC, speed, brightness);
+        let report =
+            build_mode_report(colors, self.active_profile()?, MODE_STATIC, speed, brightness);
         self.control.set_feature(&report)?;
         // Readiness is advisory. Do not abort before the keepalives: some
         // firmware revisions reject the 0x04 probe but still commit 0x11.
@@ -244,14 +267,18 @@ pub fn build_frames(colors: &[[u8; 3]; LED_COUNT], out: &mut [[u8; PACKET_LEN]; 
 
 pub fn build_static_report(
     colors: &[[u8; 3]; LED_COUNT],
+    profile: u8,
     speed: u8,
     brightness: u8,
 ) -> [u8; STATIC_REPORT_LEN] {
-    build_mode_report(colors, MODE_STATIC, speed, brightness)
+    build_mode_report(colors, profile, MODE_STATIC, speed, brightness)
 }
 
+/// `profile` is the 0-based onboard profile the report is stored in; see
+/// `VulcanDevice::active_profile`.
 pub fn build_mode_report(
     colors: &[[u8; 3]; LED_COUNT],
+    profile: u8,
     mode: u8,
     speed: u8,
     brightness: u8,
@@ -263,11 +290,11 @@ pub fn build_mode_report(
     report[0] = 0x11;
     report[1] = (STATIC_REPORT_LEN & 0xFF) as u8;
     report[2] = (STATIC_REPORT_LEN >> 8) as u8;
-    // Mini-specific header: 0x02 in the mode-class byte and 0xFB in byte 7.
-    report[3] = 0x02;
+    report[3] = profile;
     report[4] = mode;
     report[5] = speed;
     report[6] = brightness;
+    // Mini-specific.
     report[7] = 0xFB;
 
     for (logical, rgb) in colors.iter().enumerate() {
@@ -360,18 +387,20 @@ mod tests {
 
     #[test]
     fn direct_mode_report_header() {
-        let report = build_mode_report(&solid([0, 0, 0]), MODE_DIRECT, 6, BRIGHTNESS_MAX);
+        let report = build_mode_report(&solid([0, 0, 0]), 3, MODE_DIRECT, 6, BRIGHTNESS_MAX);
         assert_eq!(report[0], 0x11);
+        assert_eq!(report[3], 3);
         assert_eq!(report[4], MODE_DIRECT);
         assert_eq!(report[7], 0xFB);
     }
 
     #[test]
     fn static_report_checksum_and_bounds() {
-        let report = build_static_report(&solid([0xAA, 0xBB, 0xCC]), 6, 69);
+        let report = build_static_report(&solid([0xAA, 0xBB, 0xCC]), 0, 6, 69);
         assert_eq!(report[0], 0x11);
         assert_eq!(report[1], 0x4C);
         assert_eq!(report[2], 0x01);
+        assert_eq!(report[3], 0);
         assert_eq!(report[4], MODE_STATIC);
         assert_eq!(report[7], 0xFB);
         let sum: u32 = report[..STATIC_REPORT_LEN - 2]
@@ -384,7 +413,7 @@ mod tests {
 
     #[test]
     fn static_clamps_zero() {
-        let report = build_static_report(&solid([1, 2, 3]), 0, 0);
+        let report = build_static_report(&solid([1, 2, 3]), 0, 0, 0);
         assert_eq!(report[5], SPEED_MIN);
         assert_eq!(report[6], BRIGHTNESS_MIN);
     }
