@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const LOG_MAX_BYTES: u64 = 1 << 20;
+
 /// What the user picked in the tray. Persisted to `state.json` so it survives
 /// restarts. Focus changes never modify it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -246,13 +248,21 @@ impl Shared {
         if let Some(parent) = self.log_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Ok(mut f) = OpenOptions::new()
+        if let Ok(mut f) = self.open_log() {
+            let _ = writeln!(f, "[{secs}] {msg}");
+        }
+    }
+
+    /// Append handle for the log, rotating it to `vulcand.log.old` past
+    /// `LOG_MAX_BYTES` so an error that repeats for days cannot fill the disk.
+    fn open_log(&self) -> std::io::Result<std::fs::File> {
+        if std::fs::metadata(&self.log_path).is_ok_and(|m| m.len() > LOG_MAX_BYTES) {
+            let _ = std::fs::rename(&self.log_path, self.log_path.with_extension("log.old"));
+        }
+        OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.log_path)
-        {
-            let _ = writeln!(f, "[{secs}] {msg}");
-        }
     }
 
     pub fn shutdown(&self) {
