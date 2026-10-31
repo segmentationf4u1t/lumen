@@ -130,6 +130,20 @@ pub fn run() -> Result<()> {
             .map_err(|e| Error::new(format!("spawn watcher: {e}")))?
     };
 
+    // Desktop shells (the Quickshell panel) watch and drive the daemon here.
+    #[cfg(target_os = "linux")]
+    let control = {
+        let s = Arc::clone(&shared);
+        thread::Builder::new()
+            .name("control".to_owned())
+            .spawn(move || {
+                if let Err(e) = crate::control::serve(Arc::clone(&s)) {
+                    s.log(&format!("control socket disabled: {e}"));
+                }
+            })
+            .map_err(|e| Error::new(format!("spawn control: {e}")))?
+    };
+
     let render_result = std::panic::catch_unwind(AssertUnwindSafe(|| render_loop(&shared)));
     if render_result.is_err() {
         shared.log("render loop panicked; attempting restore");
@@ -144,6 +158,8 @@ pub fn run() -> Result<()> {
     tray::close();
     let _ = tray_handle.map(|h| h.join());
     let _ = watcher.join();
+    #[cfg(target_os = "linux")]
+    let _ = control.join();
     shared.log("vulcand stopped");
     Ok(())
 }
@@ -312,6 +328,7 @@ fn render_loop(shared: &Arc<Shared>) {
                 effects::crossfade(&mut colors, &from_colors, progress);
             }
         }
+        shared.set_frame(&colors);
 
         if let Some(dev) = device.as_ref() {
             if let Err(e) = dev.send_frame(&colors) {

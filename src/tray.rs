@@ -18,10 +18,14 @@ mod windows;
 #[cfg(windows)]
 pub use windows::{close, run};
 
+// The Linux control socket (`crate::control`) drives the same actions.
+#[cfg(target_os = "linux")]
+pub(crate) use linux::open_path;
+
 const BRIGHTNESS_STEPS: [u32; 5] = [100, 75, 50, 25, 10];
 const MAX_PROFILES: usize = 800;
 
-fn effect_label(effect: Effect) -> &'static str {
+pub(crate) fn effect_label(effect: Effect) -> &'static str {
     match effect {
         Effect::Static => "Static",
         Effect::Breathe => "Breathe",
@@ -36,7 +40,7 @@ fn effect_label(effect: Effect) -> &'static str {
     }
 }
 
-fn status_label(shared: &Shared) -> String {
+pub(crate) fn status_label(shared: &Shared) -> String {
     if !shared.is_enabled() {
         return "Paused".to_owned();
     }
@@ -62,24 +66,29 @@ fn status_label(shared: &Shared) -> String {
 // Menu actions
 
 fn toggle_pause(shared: &Shared) {
-    let enable = !shared.is_enabled();
-    shared.set_enabled(enable);
-    shared.log(if enable {
-        "resumed via tray"
-    } else {
-        "paused via tray"
-    });
+    set_paused(shared, shared.is_enabled());
+}
+
+pub(crate) fn set_paused(shared: &Shared, paused: bool) {
+    if shared.is_enabled() != paused {
+        return;
+    }
+    shared.set_enabled(!paused);
+    shared.log(if paused { "paused" } else { "resumed" });
 }
 
 fn toggle_autostart(shared: &Shared) {
-    let enable = !autostart::is_enabled();
+    set_autostart(shared, !autostart::is_enabled());
+}
+
+pub(crate) fn set_autostart(shared: &Shared, enable: bool) {
     match autostart::set_enabled(enable) {
         Ok(()) => shared.log(&format!("autostart {}", if enable { "on" } else { "off" })),
         Err(e) => shared.log(&format!("autostart failed: {e}")),
     }
 }
 
-fn reload(shared: &Arc<Shared>) {
+pub(crate) fn reload(shared: &Arc<Shared>) {
     match crate::daemon::reload_config(shared) {
         Ok(()) => {
             if shared.status().starts_with("config error") {
@@ -93,14 +102,14 @@ fn reload(shared: &Arc<Shared>) {
     }
 }
 
-fn choose_profile(shared: &Shared, name: &str) {
+pub(crate) fn choose_profile(shared: &Shared, name: &str) {
     if shared.select_profile(name) {
         shared.log(&format!("profile: {name}"));
     }
 }
 
 /// `None`: use the profile's own animation.
-fn choose_effect(shared: &Shared, effect: Option<Effect>) {
+pub(crate) fn choose_effect(shared: &Shared, effect: Option<Effect>) {
     shared.select_effect(effect);
     match effect {
         Some(effect) => shared.log(&format!("animation: {}", effect.as_str())),

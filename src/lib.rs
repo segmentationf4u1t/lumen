@@ -5,6 +5,8 @@ pub mod apps;
 pub mod autostart;
 pub mod color;
 pub mod config;
+#[cfg(target_os = "linux")]
+pub mod control;
 pub mod daemon;
 pub mod effects;
 pub mod error;

@@ -293,6 +293,16 @@ pub fn xdg_config_home() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
 }
 
+/// `$XDG_RUNTIME_DIR` (per user, cleared at logout), else the config dir:
+/// home of the daemon's lock file and control socket.
+#[cfg(not(windows))]
+pub fn runtime_dir() -> PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(config_dir)
+}
+
 pub fn default_config_path() -> PathBuf {
     config_dir().join("config.json")
 }

@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::effects::{Effect, Profile};
+use crate::protocol::LED_COUNT;
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -56,6 +57,8 @@ pub struct Shared {
     /// Bumped after every change that affects `active()`, `tip()` or the
     /// frame rate, so pollers can skip re-resolving unchanged state.
     generation: AtomicU64,
+    /// Last frame sent to the keyboard, for live previews.
+    frame: Mutex<[[u8; 3]; LED_COUNT]>,
 }
 
 impl Shared {
@@ -84,11 +87,20 @@ impl Shared {
             shutdown: AtomicBool::new(false),
             status: Mutex::new("starting".to_owned()),
             generation: AtomicU64::new(0),
+            frame: Mutex::new([[0; 3]; LED_COUNT]),
         })
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Runtime> {
         self.runtime.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn set_frame(&self, colors: &[[u8; 3]; LED_COUNT]) {
+        *self.frame.lock().unwrap_or_else(|e| e.into_inner()) = *colors;
+    }
+
+    pub fn frame(&self) -> [[u8; 3]; LED_COUNT] {
+        *self.frame.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn config(&self) -> Arc<Config> {

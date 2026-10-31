@@ -75,6 +75,11 @@ impl ksni::Tray for LumenTray {
         ksni::Category::Hardware
     }
 
+    // Middle click.
+    fn secondary_activate(&mut self, _x: i32, _y: i32) {
+        toggle_pause(&self.shared);
+    }
+
     fn icon_pixmap(&self) -> Vec<Icon> {
         let (active, paused) = &*ICONS;
         if self.shared.is_enabled() {
@@ -250,10 +255,10 @@ fn build_menu(shared: &Shared) -> Vec<MenuItem<LumenTray>> {
             toggle_autostart(shared)
         }),
         MenuItem::Separator,
-        action("Edit config…", |shared| open(shared, shared.config_path())),
+        action("Edit config…", |shared| open_path(shared, shared.config_path())),
         action("Open data folder", |shared| {
             if let Some(dir) = shared.config_path().parent() {
-                open(shared, dir);
+                open_path(shared, dir);
             }
         }),
         action("Reload config", reload),
@@ -294,7 +299,7 @@ fn session_env() -> Vec<(String, String)> {
 }
 
 /// Open a file or folder with the desktop's default application.
-fn open(shared: &Arc<Shared>, target: &Path) {
+pub(crate) fn open_path(shared: &Arc<Shared>, target: &Path) {
     let spawned = Command::new("xdg-open")
         .arg(target)
         .envs(session_env())

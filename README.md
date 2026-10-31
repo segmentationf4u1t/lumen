@@ -55,6 +55,23 @@ The tray icon is a StatusNotifierItem: it shows up in any SNI host (Waybar's
 `tray` module, Quickshell, KDE, GNOME with the AppIndicator extension). If no
 host runs yet, it appears once one does. `vulcand --no-tray` runs headless.
 
+### Quickshell panel (Linux)
+
+With a [Quickshell](https://quickshell.org) bar, `quickshell/lumen/LumenPopup.qml`
+replaces the generic tray menu with a panel: live keyboard preview, preset
+cards, animation and brightness controls, pause and start-on-login. It talks to
+`vulcand` over `$XDG_RUNTIME_DIR/lumen.sock` (JSON lines; protocol in
+`src/control.rs`) and needs the JetBrainsMono Nerd Font and
+[tabler-icons](https://tabler.io/icons) webfont.
+
+```sh
+ln -s "$PWD/quickshell/lumen" ~/.config/quickshell/lumen
+```
+
+Then load `lumen/LumenPopup.qml` in a popup of your bar and open it when the tray
+item with id `lumen` is clicked. The panel takes an optional `dropdown` property
+with a `close()` method.
+
 ### The tray menu
 
 - **Profile**, **Animation**, **Brightness**: your choice sticks. It is saved

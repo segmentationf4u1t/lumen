@@ -10,14 +10,9 @@ use std::time::{Duration, Instant};
 
 const POLL: Duration = Duration::from_millis(50);
 
-/// `$XDG_RUNTIME_DIR/vulcand.lock` (per user, cleared at logout), else the
-/// config dir. Holds the daemon's PID while it runs.
+/// Holds the daemon's PID while it runs.
 fn lock_path() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(crate::config::config_dir)
-        .join("vulcand.lock")
+    crate::config::runtime_dir().join("vulcand.lock")
 }
 
 /// Non-blocking `flock`. `Ok(false)` when another process holds a
