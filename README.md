@@ -106,6 +106,9 @@ A new config starts with dark-volcanic presets, slow and smooth, at 60 fps:
 | `basalt` | dim static magma |
 | `fps` | static magma, cream WASD |
 
+Every change of profile, animation, brightness or app rule crossfades over
+0.6 s instead of cutting.
+
 ```json
 {
   "version": 1,

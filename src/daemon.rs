@@ -3,7 +3,7 @@ use crate::config::{default_config_path, Config};
 use crate::effects;
 use crate::error::{Error, Result};
 use crate::protocol::{VulcanDevice, BRIGHTNESS_MAX, LED_COUNT, SPEED_MAX};
-use crate::runtime::Shared;
+use crate::runtime::{Active, Shared};
 use crate::takeover::DaemonLock;
 use crate::tray;
 use std::panic::AssertUnwindSafe;
@@ -153,6 +153,10 @@ pub fn run() -> Result<()> {
 /// showcase cycles keeps the showcase sequence continuous across the wrap.
 const TIME_WRAP_SECS: f64 = 3600.0;
 
+/// Crossfade length when the profile, animation, brightness or app rule
+/// changes, instead of a hard cut.
+const TRANSITION: Duration = Duration::from_millis(600);
+
 /// Reconnect delay. Doubles per failure and resets only after a connection
 /// stayed healthy, so a keyboard that connects but fails every write cannot
 /// drive a full HID enumeration + log write every 250 ms.
@@ -194,6 +198,9 @@ fn render_loop(shared: &Arc<Shared>) {
     let mut last_mtime = mtime(shared.config_path());
     let started = Instant::now();
     let mut colors = [[0u8; 3]; LED_COUNT];
+    // Lighting a change is fading away from, and since when.
+    let mut fading_from: Option<(Active, Instant)> = None;
+    let mut from_colors = [[0u8; 3]; LED_COUNT];
     let mut next_frame = Instant::now();
     let mut next_direct_check = Instant::now();
     // Resolved lighting, refreshed only when `Shared` reports a change so the
@@ -281,16 +288,30 @@ fn render_loop(shared: &Arc<Shared>) {
         let generation = shared.generation();
         if generation != seen_generation {
             seen_generation = generation;
-            active = shared.active();
+            let next = shared.active();
+            // Status-only bumps (connect, errors) leave the lighting alone.
+            if next != active {
+                fading_from = Some((std::mem::replace(&mut active, next), Instant::now()));
+            }
             frame_time = frame_duration(&shared.config());
         }
+        let t = (started.elapsed().as_secs_f64() % TIME_WRAP_SECS) as f32;
         effects::render_with(
             &active.profile,
             active.effect,
             active.brightness,
-            (started.elapsed().as_secs_f64() % TIME_WRAP_SECS) as f32,
+            t,
             &mut colors,
         );
+        if let Some((from, since)) = &fading_from {
+            let progress = since.elapsed().as_secs_f32() / TRANSITION.as_secs_f32();
+            if progress >= 1.0 {
+                fading_from = None;
+            } else {
+                effects::render_with(&from.profile, from.effect, from.brightness, t, &mut from_colors);
+                effects::crossfade(&mut colors, &from_colors, progress);
+            }
+        }
 
         if let Some(dev) = device.as_ref() {
             if let Err(e) = dev.send_frame(&colors) {

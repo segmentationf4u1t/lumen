@@ -34,7 +34,7 @@ struct Runtime {
 }
 
 /// Fully resolved lighting for the next frame.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Active {
     pub profile_name: String,
     pub profile: Profile,

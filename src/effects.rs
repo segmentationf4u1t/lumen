@@ -77,7 +77,7 @@ fn default_brightness() -> f32 {
     0.7
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Profile {
     #[serde(default)]
     pub effect: Effect,
@@ -301,12 +301,25 @@ fn render_showcase(profile: &Profile, t: f32, speed: f32, out: &mut [[u8; 3]; LE
         let mut other = [[0u8; 3]; LED_COUNT];
         render_one(profile, SHOWCASE_EFFECTS[next], t, speed, &mut other);
         let fade = (local - (SHOWCASE_SEGMENT - SHOWCASE_FADE)) / SHOWCASE_FADE;
-        for (a, b) in out.iter_mut().zip(other.iter()) {
-            for c in 0..3 {
-                a[c] = (a[c] as f32 + (b[c] as f32 - a[c] as f32) * fade).round() as u8;
-            }
+        blend(out, &other, fade);
+    }
+}
+
+/// `out` moves linearly toward `other`: 0 keeps `out`, 1 is `other`.
+fn blend(out: &mut [[u8; 3]; LED_COUNT], other: &[[u8; 3]; LED_COUNT], fade: f32) {
+    for (a, b) in out.iter_mut().zip(other.iter()) {
+        for c in 0..3 {
+            a[c] = (a[c] as f32 + (b[c] as f32 - a[c] as f32) * fade).round() as u8;
         }
     }
+}
+
+/// Ease from the `from` frame into `to` (`progress` 0..1, smoothstep), for
+/// changes of profile, animation, brightness or app rule.
+pub fn crossfade(to: &mut [[u8; 3]; LED_COUNT], from: &[[u8; 3]; LED_COUNT], progress: f32) {
+    let p = if progress.is_finite() { progress.clamp(0.0, 1.0) } else { 1.0 };
+    // `blend` moves toward its second argument, so fade `to` back to `from`.
+    blend(to, from, 1.0 - p * p * (3.0 - 2.0 * p));
 }
 
 #[cfg(test)]
@@ -329,6 +342,25 @@ mod tests {
         };
         assert_eq!(frame(&p, 0.0), [[10, 20, 30]; LED_COUNT]);
         assert_eq!(frame(&p, 123.4), [[10, 20, 30]; LED_COUNT]);
+    }
+
+    /// A transition starts on the old lighting, ends exactly on the new one,
+    /// and eases (no jump at either end).
+    #[test]
+    fn crossfade_runs_from_old_to_new() {
+        let from = [[200, 0, 0]; LED_COUNT];
+        let to = [[0, 0, 200]; LED_COUNT];
+        let at = |progress| {
+            let mut out = to;
+            crossfade(&mut out, &from, progress);
+            out[0]
+        };
+        assert_eq!(at(0.0), [200, 0, 0]);
+        assert_eq!(at(0.5), [100, 0, 100]);
+        assert_eq!(at(1.0), [0, 0, 200]);
+        assert_eq!(at(2.0), [0, 0, 200]);
+        // Smoothstep: the first 5% moves the color far less than 5%.
+        assert!(at(0.05)[2] < 5);
     }
 
     #[test]
