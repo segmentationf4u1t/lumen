@@ -299,15 +299,16 @@ impl HidHandle {
             ))
         })?;
 
-        let handle = open_path(&found.path, GENERIC_READ | GENERIC_WRITE)?;
-        let caps = read_caps(handle).ok_or_else(|| Error::new("HidP_GetCaps failed"))?;
-        let product = read_wide_string(handle, false);
-        Ok(Self {
-            handle,
+        // Own the handle before anything can fail so `Drop` closes it.
+        let mut owned = Self {
+            handle: open_path(&found.path, GENERIC_READ | GENERIC_WRITE)?,
             path: found.path,
-            product,
-            caps,
-        })
+            product: String::new(),
+            caps: HIDP_CAPS::default(),
+        };
+        owned.caps = read_caps(owned.handle).ok_or_else(|| Error::new("HidP_GetCaps failed"))?;
+        owned.product = read_wide_string(owned.handle, false);
+        Ok(owned)
     }
 
     pub fn path(&self) -> &str {
